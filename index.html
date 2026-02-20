@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Správce nouzového osvětlení</title>
+<style>
+body { font-family: Arial; background:#f2f2f2; padding:0; margin:0; }
+.header {
+  position: sticky; top:0; background:#f2f2f2; padding:10px; z-index:10;
+  border-bottom:1px solid #ccc; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+}
+.header h2 { display:inline-block; margin:0; margin-right:20px; }
+.header button { padding:6px 12px; cursor:pointer; }
+.table-container { max-height:700px; overflow-y:auto; padding:10px; }
+table { width:100%; border-collapse:collapse; background:#fff; }
+th, td { border:1px solid #ccc; padding:6px; text-align:center; }
+th { background:#eee; }
+.low { background:#c8f7c5; }
+.mid { background:#fff3b0; }
+.high { background:#f7c5c5; }
+input, select { padding:6px; box-sizing:border-box; }
+input[type="text"] { width:220px; }
+.filter-panel {
+  display:none; width:100%; padding:10px; background:#fff; border-top:1px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,.05);
+  gap:10px; align-items:center;
+}
+.filter-panel .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.modal-bg {
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.5); justify-content:center; align-items:center;
+}
+.modal {
+  background:#fff; padding:20px; border-radius:6px; width:80%; max-width:500px; max-height:80%; overflow:auto;
+}
+.modal-header { font-weight:bold; margin-bottom:10px; }
+.modal-footer { margin-top:10px; text-align:right; }
+.id-segment { display:flex; gap:5px; margin-bottom:5px; }
+.id-segment input { flex:1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h2>Nouzové osvětlení – správa baterií</h2>
+  <button onclick="openAddLight()">Přidat svítidlo</button>
+  <button onclick="openManageLights()">Správa typů</button>
+  <button onclick="deleteSelected()">Smazat označené</button>
+  <button onclick="openInfo()">Informace</button>
+  <button onclick="exportAllToCSV()">Exportovat CSV</button>
+  <button onclick="document.getElementById('csvFileInput').click()">Importovat CSV</button>
+  <button onclick="toggleFilter()">Filtr</button>
+  <input type="file" id="csvFileInput" accept=".csv" style="display:none" onchange="importAllFromCSV(event)">
+  <button onclick="exportTableToPDF()">Exportovat do PDF</button>
+</div>
+
+<div id="filterPanel" class="filter-panel">
+  <div class="row">
+    <input type="text" id="filterText" placeholder="Hledat: ID / místnost / část názvu">
+    <select id="filterStatus">
+      <option value="">Všechny stavy</option>
+      <option value="dobrá">Jen dobré</option>
+      <option value="možná">Jen možná</option>
+      <option value="vadná">Jen vadné</option>
+    </select>
+    <select id="filterManufacturer"><option value="">Všichni výrobci</option></select>
+    <select id="filterModel"><option value="">Všechny typy</option></select>
+    <button onclick="applyFilter()">Použít</button>
+    <button onclick="clearFilter()">Vyčistit</button>
+  </div>
+</div>
+
+<div class="table-container">
+  <table id="table"></table>
+</div>
+
+<style>
+#addModal .modal { width: min(96%, 900px); max-width: 500px; padding: 20px; box-sizing: border-box; }
+#addModal .modal .modal-content { max-height: calc(80vh - 120px); overflow: auto; }
+#addModal .id-segment { gap: 8px; flex-wrap: wrap; }
+#addModal .id-segment input:first-child { flex: 0 0 70px; max-width: 70px; }
+#addModal .id-segment input:nth-child(2) { flex: 0 0 90px; max-width: 90px; }
+#addModal .id-segment input:nth-child(3) { flex: 0 0 90px; max-width: 90px; }
+#addModal .id-segment input:nth-child(4) { flex: 0 0 80px; max-width: 80px; }
+#addModal .modal-content input, #addModal .modal-content select { width: 100%; box-sizing: border-box; }
+</style>
+
+<div class="modal-bg" id="addModal">
+  <div class="modal">
+    <div class="modal-header">Přidat / upravit svítidlo</div>
+    <div class="modal-content">
+      <div class="id-segment">
+        <input id="id_floor" maxlength="4" placeholder="Poschodí" title="Max 4 znaky">
+        <input id="id_room" placeholder="Místnost (NN)">
+        <input id="id_number" placeholder="Číslo">
+        <input id="id_count" type="number" min="1" max="200" value="1" placeholder="Počet">
+      </div>
+      <input id="id" placeholder="ID NO" readonly style="margin-bottom:8px;">
+      <select id="model"><option value="">--vyber typ--</option></select>
+      <input id="manufacturer" placeholder="Výrobce" readonly>
+      <select id="bat">
+        <option value="NiCd">Ni-Cd</option>
+        <option value="NiMH">Ni-MH</option>
+        <option value="LiIon">Li-Ion</option>
+      </select>
+      <select id="temp">
+        <option value="inner">Vnitřní (20–25 °C)</option>
+        <option value="hot">Teplo (30–40 °C)</option>
+        <option value="out">Venkovní (-25 až +45 °C)</option>
+      </select>
+      <input id="loc" placeholder="Umístění svítidla">
+      <select id="month"></select>
+      <input id="year" type="number" placeholder="Rok instalace">
+    </div>
+    <div class="modal-footer">
+      <button onclick="saveLight()">Uložit</button>
+      <button onclick="closeAddLight()">Storno</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="manageModal">
+  <div class="modal">
+    <div class="modal-header">Správa typů svítidel</div>
+    <div class="modal-content" id="manageContent"></div>
+    <div class="modal-footer">
+      <button onclick="openAddPreset()">Přidat nové svítidlo</button>
+      <button onclick="closeManage()">Zavřít</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="addPresetModal">
+  <div class="modal">
+    <div class="modal-header">Přidat nový typ svítidla</div>
+    <div class="modal-content">
+      <input id="presetManufacturer" placeholder="Výrobce">
+      <input id="presetModel" placeholder="Typ svítidla">
+      <select id="presetBattery">
+        <option value="NiCd">Ni-Cd</option>
+        <option value="NiMH">Ni-MH</option>
+        <option value="LiIon">Li-Ion</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button onclick="savePreset()">Uložit</button>
+      <button onclick="closeAddPreset()">Storno</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="infoModal">
+  <div class="modal">
+    <div class="modal-header">Informace o svítidlech</div>
+    <div class="modal-content" id="infoContent"></div>
+    <div class="modal-footer">
+      <button onclick="closeInfo()">Zavřít</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Data a nastavení
+const LIFE = { NiCd:4, NiMH:3, LiIon:6 };
+const TEMP_FACTOR = { inner:1, hot:1.7, out:2.5 };
+let data = [];
+let presetLights = [];
+let editIndex = null;
+let editPresetIndex = null;
+let activeFilter = { text: '', status: '', manufacturer: '', model: '' };
+
+function escapeHTML(s){
+  return String(s === undefined || s === null ? '' : s)
+    .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+}
+
+function initMonthYear(){
+  const monthSelect = document.getElementById("month");
+  monthSelect.innerHTML="";
+  for(let i=1;i<=12;i++) monthSelect.innerHTML += `<option value="${i}">${i}</option>`;
+  const yearInput = document.getElementById("year");
+  const currentYear = new Date().getFullYear();
+  yearInput.max = currentYear;
+}
+initMonthYear();
+
+function updateID(){
+  let floor = document.getElementById("id_floor").value.trim();
+  let room = document.getElementById("id_room").value.trim().toUpperCase();
+  let number = document.getElementById("id_number").value.trim().padStart(3,'0');
+  if(floor || room || number){
+    document.getElementById("id").value = `NO.${floor}.${room}.${number}`;
+  } else {
+    document.getElementById("id").value = "";
+  }
+}
+document.getElementById("id_floor").addEventListener("input", updateID);
+document.getElementById("id_room").addEventListener("input", updateID);
+document.getElementById("id_number").addEventListener("input", updateID);
+
+function yearsSince(month, year){
+  const d = new Date(year, month-1, 1);
+  return (Date.now() - d) / (1000*60*60*24*365);
+}
+function riskCalc(l){
+  const age = yearsSince(l.month, l.year);
+  let life = (LIFE[l.battery] || 4) / (TEMP_FACTOR[l.temp] || 1);
+  let risk = age / life;
+  return Math.min(1, risk);
+}
+function riskText(risk){
+  if(risk<=0.5) return "dobrá";
+  if(risk<=0.8) return "možná";
+  return "vadná";
+}
+function tempText(t){
+  if(t==="inner") return "Vnitřní (20–25 °C)";
+  if(t==="hot") return "Teplo (30–40 °C)";
+  if(t==="out") return "Venkovní (-25 až +45 °C)";
+  return t;
+}
+
+function toggleFilter(){
+  const p = document.getElementById("filterPanel");
+  p.style.display = p.style.display === "flex" || p.style.display === "block" ? "none" : "flex";
+  if(p.style.display !== "none") { populateFilterOptions(); }
+}
+function populateFilterOptions(){
+  const manSet = new Set();
+  const modelSet = new Set();
+  presetLights.forEach(p=>{ if(p.manufacturer) manSet.add(p.manufacturer); if(p.model) modelSet.add(p.model); });
+  data.forEach(d=>{ if(d.manufacturer) manSet.add(d.manufacturer); if(d.model) modelSet.add(d.model); });
+
+  const manSel = document.getElementById("filterManufacturer");
+  const modelSel = document.getElementById("filterModel");
+  const curMan = manSel.value;
+  const curModel = modelSel.value;
+
+  manSel.innerHTML = '<option value="">Všichni výrobci</option>';
+  Array.from(manSet).sort().forEach(m=> manSel.innerHTML += `<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`);
+
+  modelSel.innerHTML = '<option value="">Všechny typy</option>';
+  Array.from(modelSet).sort().forEach(m=> modelSel.innerHTML += `<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`);
+
+  if(curMan) manSel.value = curMan;
+  if(curModel) modelSel.value = curModel;
+}
+document.getElementById("filterText").addEventListener("input", ()=> { activeFilter.text = document.getElementById("filterText").value.trim().toLowerCase(); render(); });
+document.getElementById("filterStatus").addEventListener("change", ()=> { activeFilter.status = document.getElementById("filterStatus").value; render(); });
+document.getElementById("filterManufacturer").addEventListener("change", ()=> {
+  activeFilter.manufacturer = document.getElementById("filterManufacturer").value;
+  const allModels = new Set();
+  if(activeFilter.manufacturer){
+    presetLights.concat(data).forEach(p=>{
+      if((p.manufacturer||'') === activeFilter.manufacturer && p.model) allModels.add(p.model);
+    });
+  } else {
+    presetLights.concat(data).forEach(p=>{ if(p.model) allModels.add(p.model); });
+  }
+  const modelSel = document.getElementById("filterModel");
+  const cur = modelSel.value;
+  modelSel.innerHTML = '<option value="">Všechny typy</option>';
+  Array.from(allModels).sort().forEach(m=> modelSel.innerHTML += `<option value="${escapeHTML(m)}">${escapeHTML(m)}</option>`);
+  modelSel.value = cur || "";
+  activeFilter.model = modelSel.value;
+  render();
+});
+document.getElementById("filterModel").addEventListener("change", ()=> { activeFilter.model = document.getElementById("filterModel").value; render(); });
+
+function applyFilter(){
+  activeFilter.text = document.getElementById("filterText").value.trim().toLowerCase();
+  activeFilter.status = document.getElementById("filterStatus").value;
+  activeFilter.manufacturer = document.getElementById("filterManufacturer").value;
+  activeFilter.model = document.getElementById("filterModel").value;
+  render();
+}
+function clearFilter(){
+  document.getElementById("filterText").value = "";
+  document.getElementById("filterStatus").value = "";
+  document.getElementById("filterManufacturer").value = "";
+  document.getElementById("filterModel").value = "";
+  activeFilter = { text:'', status:'', manufacturer:'', model:'' };
+  render();
+}
+
+function render(){
+  data = data || [];
+  data.forEach(d => { d.risk = riskCalc(d); d.state = riskText(d.risk); });
+
+  let filtered = data.filter(d=>{
+    if(activeFilter.text){
+      const needle = activeFilter.text;
+      const hay = `${d.id||''} ${d.loc||''} ${d.model||''} ${d.manufacturer||''}`.toLowerCase();
+      if(!hay.includes(needle)) return false;
+    }
+    if(activeFilter.status){
+      if((d.state||'') !== activeFilter.status) return false;
+    }
+    if(activeFilter.manufacturer){
+      if((d.manufacturer||'') !== activeFilter.manufacturer) return false;
+    }
+    if(activeFilter.model){
+      if((d.model||'') !== activeFilter.model) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a,b)=>{
+    const getRoomNum = x => {
+      try{
+        const parts = (x.id||'').split('.');
+        return {room:(parts[2]||''), num:parseInt(parts[3]||'0',10)||0};
+      } catch(e){ return {room:'',num:0}; }
+    };
+    const A = getRoomNum(a);
+    const B = getRoomNum(b);
+    const rA = (A.room||'').toUpperCase();
+    const rB = (B.room||'').toUpperCase();
+    if(rA < rB) return -1;
+    if(rA > rB) return 1;
+    return A.num - B.num;
+  });
+
+  const t = document.getElementById("table");
+  t.innerHTML = '';
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr>
+    <th><input id="selectAll" type="checkbox"></th><th>ID NO</th><th>Výrobce</th><th>Typ</th><th>Baterie</th>
+    <th>Teplota</th><th>Umístění</th><th>Instalace</th><th>Stav</th><th></th>
+  </tr>`;
+  t.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  filtered.forEach((l,i)=>{
+    const globalIndex = data.indexOf(l);
+    const tr = document.createElement('tr');
+    tr.className = l.state === "dobrá" ? "low" : l.state === "možná" ? "mid" : "high";
+    tr.innerHTML = `
+      <td><input type="checkbox" data-i="${globalIndex}"></td>
+      <td>${escapeHTML(l.id)}</td>
+      <td>${escapeHTML(l.manufacturer)}</td>
+      <td>${escapeHTML(l.model)}</td>
+      <td>${escapeHTML(l.battery)}</td>
+      <td>${escapeHTML(tempText(l.temp))}</td>
+      <td>${escapeHTML(l.loc)}</td>
+      <td>${escapeHTML((l.month||'') + '.' + (l.year||''))}</td>
+      <td>${escapeHTML(l.state)}</td>
+      <td><button data-edit="${globalIndex}">Upravit</button></td>`;
+    tbody.appendChild(tr);
+  });
+  t.appendChild(tbody);
+
+  t.querySelectorAll('button[data-edit]').forEach(btn=>{
+    btn.removeEventListener('click', btn._cb);
+    btn._cb = () => edit(parseInt(btn.getAttribute('data-edit'),10));
+    btn.addEventListener('click', btn._cb);
+  });
+
+  const selectAll = document.getElementById("selectAll");
+  if(selectAll){
+    selectAll.removeEventListener('change', selectAll._cb);
+    selectAll._cb = () => toggleAll(selectAll);
+    selectAll.addEventListener('change', selectAll._cb);
+  }
+
+  window.edit = function(i){
+    if(typeof data[i] === 'undefined'){ alert('Neplatné ID'); return; }
+    const l = data[i];
+    editIndex = i;
+    openAddLight();
+    const parts = (l.id||'').split('.');
+    if(parts.length === 4){
+      document.getElementById("id_floor").value = parts[1];
+      document.getElementById("id_room").value = parts[2];
+      document.getElementById("id_number").value = parts[3];
+    } else {
+      document.getElementById("id_floor").value = "";
+      document.getElementById("id_room").value = "";
+      document.getElementById("id_number").value = "";
+    }
+    document.getElementById("loc").value = l.loc || "";
+    document.getElementById("temp").value = l.temp || "inner";
+    document.getElementById("month").value = l.month || 1;
+    document.getElementById("year").value = l.year || new Date().getFullYear();
+    updateID();
+    renderModelSelect(l.model);
+    document.getElementById("id_count").style.display = "none";
+  };
+
+  populateFilterOptions();
+}
+
+function renderModelSelect(selectedModel){
+  const sel = document.getElementById("model");
+  sel.innerHTML = '<option value="">--vyber typ--</option>';
+  presetLights.forEach(p => {
+    const opt = document.createElement("option");
+    opt.value = p.model;
+    opt.textContent = p.model;
+    opt.dataset.manufacturer = p.manufacturer;
+    opt.dataset.battery = p.battery;
+    if(selectedModel && p.model === selectedModel){
+      opt.selected = true;
+      document.getElementById("manufacturer").value = p.manufacturer;
+      document.getElementById("bat").value = p.battery;
+    }
+    sel.appendChild(opt);
+  });
+}
+
+function openAddLight(){ clearForm(); renderModelSelect(); document.getElementById("addModal").style.display="flex"; }
+function closeAddLight(){ document.getElementById("addModal").style.display="none"; editIndex = null; document.getElementById("id_count").style.display = "inline-block"; }
+function openManageLights(){ renderManage(); document.getElementById("manageModal").style.display="flex"; }
+function closeManage(){ document.getElementById("manageModal").style.display="none"; }
+function openAddPreset(){ editPresetIndex=null; document.getElementById("presetManufacturer").value=""; document.getElementById("presetModel").value=""; document.getElementById("presetBattery").value="NiCd"; document.getElementById("addPresetModal").style.display="flex"; }
+function closeAddPreset(){ document.getElementById("addPresetModal").style.display="none"; }
+
+document.getElementById("model").addEventListener("change",function(){
+  const opt=this.selectedOptions[0];
+  if(opt){
+    document.getElementById("manufacturer").value=opt.dataset.manufacturer||"";
+    document.getElementById("bat").value=opt.dataset.battery||"NiCd";
+  }
+});
+
+function saveLight(){
+  const floor = document.getElementById("id_floor").value.trim();
+  const room = document.getElementById("id_room").value.trim().toUpperCase();
+  const numberStr = document.getElementById("id_number").value.trim().padStart(3,'0');
+  const count = parseInt(document.getElementById("id_count").value) || 1;
+
+  if(!floor || !room || !numberStr){
+    alert("Vyplň Poschodí, Místnost a číslo");
+    return;
+  }
+
+  const manufacturer = document.getElementById("manufacturer").value.trim();
+  const model = document.getElementById("model").value.trim();
+  const battery = document.getElementById("bat").value;
+  const temp = document.getElementById("temp").value;
+  const loc = document.getElementById("loc").value.trim();
+  const month = +document.getElementById("month").value;
+  const year = +document.getElementById("year").value;
+
+  if(!manufacturer || !model || !loc || !month || !year){
+    alert("Vyplň všechna povinná pole");
+    return;
+  }
+
+ if(editIndex !== null){
+  const l = data[editIndex];
+  const newId = `NO.${floor}.${room}.${numberStr}`;
+
+  if(newId !== l.id && data.some(d => d.id === newId)){
+    alert(`ID ${newId} již existuje!`);
+    return;
+  }
+
+  l.id = newId;
+  l.manufacturer = manufacturer;
+  l.model = model;
+  l.battery = battery;
+  l.temp = temp;
+  l.loc = loc;
+  l.month = month;
+  l.year = year;
+
+  alert("Svítidlo upraveno ✅");
+  editIndex = null;
+  document.getElementById("id_count").style.display = "inline-block";
+
+} else {
+    let startNumber = parseInt(numberStr);
+    for(let i=0;i<count;i++){
+      const num = (startNumber + i).toString().padStart(3,'0');
+      const idVal = `NO.${floor}.${room}.${num}`;
+
+      if(data.some(d=>d.id===idVal)){
+        alert(`ID ${idVal} již existuje! Přeskočeno.`);
+        continue;
+      }
+
+      let obj = {
+        id: idVal,
+        manufacturer,
+        model,
+        battery,
+        temp,
+        loc,
+        month,
+        year,
+        mtest:11,
+        rtest:1
+      };
+
+      data.push(obj);
+    }
+
+    alert("Svítidla uložena ✅");
+  }
+
+  render();
+  closeAddLight();
+}
+
+function deleteSelected(){
+  const checked = Array.from(document.querySelectorAll('#table input[type=checkbox][data-i]'))
+    .filter(chk => chk.checked)
+    .map(chk => parseInt(chk.dataset.i,10));
+  if(checked.length === 0){ alert("Nic není označeno"); return; }
+  data = data.filter((_,i) => !checked.includes(i));
+  alert("Vybrané smazáno ✅");
+  render();
+}
+function toggleAll(cb){
+  const checked = !!cb.checked;
+  document.querySelectorAll('#table input[type=checkbox][data-i]').forEach(chk=>{
+    chk.checked = checked;
+  });
+}
+function clearForm(){
+  document.getElementById("id_floor").value="";
+  document.getElementById("id_room").value="";
+  document.getElementById("id_number").value="";
+  document.getElementById("id").value="";
+  document.getElementById("manufacturer").value="";
+  document.getElementById("model").value="";
+  document.getElementById("bat").value="NiCd";
+  document.getElementById("temp").value="inner";
+  document.getElementById("loc").value="";
+  document.getElementById("month").value="1";
+  document.getElementById("year").value=new Date().getFullYear();
+  document.getElementById("id_count").style.display = "inline-block";
+}
+
+function renderManage(){
+  const div=document.getElementById("manageContent");
+  div.innerHTML="";
+  if(presetLights.length===0){ div.innerHTML="<p>Žádné připravené svítidlo.</p>"; return;}
+  presetLights.forEach((p,i)=>{
+    let row=document.createElement("div");
+    row.style.borderBottom="1px solid #ccc"; row.style.padding="5px 0";
+    row.innerHTML=`<b>${escapeHTML(p.manufacturer)}</b> | ${escapeHTML(p.model)} | ${escapeHTML(p.battery)} 
+      <button data-editpreset="${i}">Upravit</button>
+      <button data-deletepreset="${i}">Smazat</button>`;
+    div.appendChild(row);
+  });
+  div.querySelectorAll('button[data-editpreset]').forEach(btn=>{
+    btn.onclick = () => editPreset(parseInt(btn.getAttribute('data-editpreset'),10));
+  });
+  div.querySelectorAll('button[data-deletepreset]').forEach(btn=>{
+    btn.onclick = () => deletePreset(parseInt(btn.getAttribute('data-deletepreset'),10));
+  });
+}
+function savePreset(){
+  const man=document.getElementById("presetManufacturer").value.trim();
+  const mod=document.getElementById("presetModel").value.trim();
+  const bat=document.getElementById("presetBattery").value;
+  if(!man||!mod){ alert("Vyplň Výrobce a Typ"); return;}
+  let obj={manufacturer:man,model:mod,battery:bat};
+  if(editPresetIndex!==null){ presetLights[editPresetIndex]=obj; editPresetIndex=null; }
+  else{ presetLights.push(obj);}
+  closeAddPreset(); renderManage(); renderModelSelect(); populateFilterOptions();
+}
+function editPreset(i){
+  editPresetIndex=i;
+  const p=presetLights[i];
+  document.getElementById("presetManufacturer").value=p.manufacturer;
+  document.getElementById("presetModel").value=p.model;
+  document.getElementById("presetBattery").value=p.battery;
+  document.getElementById("addPresetModal").style.display="flex";
+}
+function deletePreset(i){
+  if(confirm("Opravdu smazat?")){ presetLights.splice(i,1); renderManage(); renderModelSelect(); populateFilterOptions(); }
+}
+
+function openInfo(){
+  const div = document.getElementById("infoContent");
+  div.innerHTML = ""; 
+  const total = data.length;
+  const bad = data.filter(d=>d.state==="vadná").length;
+  div.innerHTML += `<p><b>Celkový počet NO:</b> ${total}</p>`;
+  div.innerHTML += `<p><b>Celkový počet špatných NO:</b> ${bad}</p>`;
+  const byMan = {};
+  data.forEach(d=>{ if(!byMan[d.manufacturer]) byMan[d.manufacturer]=0; byMan[d.manufacturer]++; });
+  div.innerHTML += `<p><b>Celkový počet NO podle výrobce:</b></p>`;
+  for(let man in byMan){ div.innerHTML += `<p>${escapeHTML(man)}: ${byMan[man]}</p>`; }
+  const byType = {};
+  data.forEach(d=>{
+    const key = `${d.manufacturer} ${d.model}`;
+    if(!byType[key]) byType[key]=0;
+    byType[key]++;
+  });
+  div.innerHTML += `<p><b>Celkový počet NO podle typu:</b></p>`;
+  for(let t in byType){ div.innerHTML += `<p>${escapeHTML(t)}: ${byType[t]}</p>`; }
+  document.getElementById("infoModal").style.display="flex";
+}
+function closeInfo(){ document.getElementById("infoModal").style.display="none"; }
+
+async function exportAllToCSV(){
+  let csv = "";
+  csv += "PRESET_LIGHTS\n";
+  csv += "Výrobce,Typ,Baterie\n";
+  presetLights.forEach(p => {
+    csv += `"${String(p.manufacturer).replace(/"/g,'""')}","${String(p.model).replace(/"/g,'""')}","${String(p.battery).replace(/"/g,'""')}"\n`;
+  });
+  csv += "\nLIGHTS_DATA\n";
+  csv += "ID NO,Výrobce,Typ,Baterie,Teplota,Umístění,Měsíc,Rok\n";
+  data.forEach(l => {
+    csv += `"${String(l.id).replace(/"/g,'""')}","${String(l.manufacturer).replace(/"/g,'""')}","${String(l.model).replace(/"/g,'""')}","${String(l.battery).replace(/"/g,'""')}","${String(l.temp).replace(/"/g,'""')}","${String(l.loc).replace(/"/g,'""')}",${l.month},${l.year}\n`;
+  });
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: `nouzove_osvetleni_${new Date().toISOString().split('T')[0]}.csv`,
+        types: [{ description: 'CSV soubory', accept: {'text/csv': ['.csv']} }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(csv);
+      await writable.close();
+      alert("CSV soubor byl uložen ✅");
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Chyba při ukládání:', err);
+        alert('Chyba při ukládání souboru: ' + err.message);
+      }
+    }
+  } else {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `nouzove_osvetleni_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    alert("CSV soubor byl stažen ✅\n(Váš prohlížeč nepodporuje výběr umístění)");
+  }
+}
+
+function importAllFromCSV(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const text = e.target.result;
+      const lines = text.split(/\r?\n/);
+      if(lines.length < 2){ alert("CSV soubor je prázdný!"); return; }
+      let section = null;
+      let newPresets = [];
+      let newData = [];
+      let i = 0;
+      while(i < lines.length){
+        const raw = lines[i];
+        const line = raw.trim();
+        i++;
+        if(line === "PRESET_LIGHTS"){ section = "presets"; i++; continue; }
+        else if(line === "LIGHTS_DATA"){ section = "lights"; i++; continue; }
+        if(!line) continue;
+        const fields = parseCSVLine(raw);
+        if(section === "presets" && fields.length >= 3){
+          newPresets.push({ manufacturer: fields[0], model: fields[1], battery: fields[2] });
+        } else if(section === "lights" && fields.length >= 8){
+          newData.push({
+            id: fields[0],
+            manufacturer: fields[1],
+            model: fields[2],
+            battery: fields[3],
+            temp: fields[4],
+            loc: fields[5],
+            month: parseInt(fields[6]) || 1,
+            year: parseInt(fields[7]) || new Date().getFullYear(),
+            mtest: 11,
+            rtest: 1
+          });
+        }
+      }
+      if(newPresets.length === 0 && newData.length === 0){ alert("Žádná validní data k importu!"); return; }
+      const replace = confirm(`Nalezeno:\n- ${newPresets.length} typů svítidel\n- ${newData.length} záznamů svítidel\n\nKlikni OK pro nahrazení stávajících dat.\nKlikni Storno pro přidání k existujícím datům.`);
+      if(replace){ presetLights = newPresets; data = newData; }
+      else {
+        newPresets.forEach(newPreset => {
+          if(!presetLights.some(p => p.manufacturer === newPreset.manufacturer && p.model === newPreset.model)){
+            presetLights.push(newPreset);
+          }
+        });
+        newData.forEach(newItem => {
+          if(!data.some(d => d.id === newItem.id)){
+            data.push(newItem);
+          }
+        });
+      }
+      render();
+      populateFilterOptions();
+      alert(`Import dokončen! ✅\n- Typy: ${newPresets.length}\n- Svítidla: ${newData.length}`);
+    } catch(err){
+      alert(`Chyba při importu CSV: ${err.message}`);
+      console.error(err);
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function parseCSVLine(line){
+  const fields = [];
+  let current = '';
+  let inQuotes = false;
+  for(let i=0;i<line.length;i++){
+    const ch = line[i];
+    if(ch === '"'){
+      if(inQuotes && line[i+1] === '"'){ current += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+    } else if(ch === ',' && !inQuotes){
+      fields.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current);
+  return fields.map(f=>{
+    let s = f.trim();
+    if(s.startsWith('"') && s.endsWith('"')) s = s.slice(1,-1);
+    return s;
+  });
+}
+
+// Export current (zobrazená) tabulka do PDF - bez prvního sloupce (checkbox) a posledního (upravit)
+// Exportuje sloupce: ID NO, Výrobce, Typ, Baterie, Teplota, Umístění, Instalace, Stav
+function exportTableToPDF(){
+  const tableEl = document.getElementById('table');
+  if(!tableEl){ alert('Žádná tabulka k exportu'); return; }
+
+  // Create a table reflecting currently displayed rows (respects filters)
+  // We'll build a clean table with desired columns to avoid depending on DOM column positions.
+  const headers = ["ID NO","Výrobce","Typ","Baterie","Teplota","Umístění","Instalace","Stav"];
+  const docTable = document.createElement('table');
+  const thead = document.createElement('thead');
+  const thr = document.createElement('tr');
+  headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; thr.appendChild(th); });
+  thead.appendChild(thr);
+  docTable.appendChild(thead);
+  const tbody = document.createElement('tbody');
+
+  // Read currently rendered rows from the visible table (which already respects filters and sorting)
+  const rows = tableEl.querySelectorAll('tbody tr');
+  rows.forEach(tr => {
+    // cells: [checkbox, ID, Výrobce, Typ, Baterie, Teplota, Umístění, Instalace, Stav, upravit]
+    const cells = tr.querySelectorAll('td');
+    if(cells.length < 9) return; // unexpected format
+    const outRow = document.createElement('tr');
+    const values = [
+      cells[1].textContent.trim(), // ID
+      cells[2].textContent.trim(), // Výrobce
+      cells[3].textContent.trim(), // Typ
+      cells[4].textContent.trim(), // Baterie
+      cells[5].textContent.trim(), // Teplota
+      cells[6].textContent.trim(), // Umístění
+      cells[7].textContent.trim(), // Instalace
+      cells[8].textContent.trim()  // Stav
+    ];
+    values.forEach(v => { const td = document.createElement('td'); td.textContent = v; outRow.appendChild(td); });
+    tbody.appendChild(outRow);
+  });
+
+  docTable.appendChild(tbody);
+
+  const style = `<style>
+    body{font-family:Arial,Helvetica,sans-serif;margin:20px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #222;padding:6px;text-align:center;font-size:12px}
+    th{background:#eee}
+    h3{margin:12px 0;font-size:16px}
+  </style>`;
+
+  const win = window.open('','_blank','width=1000,height=800');
+  if(!win){ alert('Nelze otevřít nové okno (blokováno).'); return; }
+  win.document.write('<!doctype html><html><head><title>Export - nouzove_osvetleni</title>' + style + '</head><body>');
+  win.document.write(`<h3>Výpis svítidel (${new Date().toLocaleString()})</h3>`);
+  const total = rows.length;
+const bad = Array.from(rows).filter(r => 
+  r.querySelectorAll('td')[8]?.textContent.trim() === 'vadná'
+).length;
+
+win.document.write(`
+  <p>
+    <b>Datum kontroly:</b> ${new Date().toLocaleDateString("cs-CZ")}<br>
+    <b>Počet zobrazených svítidel:</b> ${total}<br>
+    <b>Vadná svítidla:</b> ${bad}
+  </p>
+  <hr>
+`);
+  win.document.write(docTable.outerHTML);
+  win.document.write('</body></html>');
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ try { win.print(); } catch(e){ console.error(e); } }, 250);
+}
+
+render();
+</script>
+
+</body>
+</html>
