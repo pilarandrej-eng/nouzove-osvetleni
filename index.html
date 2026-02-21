@@ -160,8 +160,8 @@ input[type="text"] { width:220px; }
 
 <script>
 // Data a nastavení
-const LIFE = { NiCd:7, NiMH:6, LiIon:8 };
-const TEMP_FACTOR = { inner:1, hot:1.7, out:2.5 };
+const LIFE = { NiCd:7, NiMH:6, LiIon:10 };
+const TEMP_FACTOR = { inner:1, hot:1.2, out:1.5 };
 let data = [];
 let presetLights = [];
 let editIndex = null;
@@ -203,13 +203,12 @@ function yearsSince(month, year){
 }
 function riskCalc(l){
   const age = yearsSince(l.month, l.year);
-  let life = (LIFE[l.battery] || 4) / (TEMP_FACTOR[l.temp] || 1);
+  const life = (LIFE[l.battery] || 7) / (TEMP_FACTOR[l.temp] || 1);
   let risk = age / life;
-  return Math.min(1, risk);
 }
 function riskText(risk){
-  if(risk<=0.7) return "dobrá";
-  if(risk<=0.9) return "možná";
+  if(risk<=0.8) return "dobrá";
+  if(risk<=0.97) return "možná";
   return "vadná";
 }
 function tempText(t){
@@ -805,3 +804,4 @@ render();
 
 </body>
 </html>
+
