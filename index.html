@@ -160,7 +160,7 @@ input[type="text"] { width:220px; }
 
 <script>
 // Data a nastavení
-const LIFE = { NiCd:4, NiMH:3, LiIon:6 };
+const LIFE = { NiCd:7, NiMH:6, LiIon:8 };
 const TEMP_FACTOR = { inner:1, hot:1.7, out:2.5 };
 let data = [];
 let presetLights = [];
@@ -208,8 +208,8 @@ function riskCalc(l){
   return Math.min(1, risk);
 }
 function riskText(risk){
-  if(risk<=0.5) return "dobrá";
-  if(risk<=0.8) return "možná";
+  if(risk<=0.7) return "dobrá";
+  if(risk<=0.9) return "možná";
   return "vadná";
 }
 function tempText(t){
