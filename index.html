@@ -207,8 +207,8 @@ function riskCalc(l){
   let risk = age / life;
 }
 function riskText(risk){
-  if(risk<=0.8) return "dobrá";
-  if(risk<=0.97) return "možná";
+  if(risk<=0.85) return "dobrá";
+  if(risk<=1.05) return "možná";
   return "vadná";
 }
 function tempText(t){
@@ -804,6 +804,7 @@ render();
 
 </body>
 </html>
+
 
 
 
