@@ -304,21 +304,40 @@ function render(){
     return true;
   });
 
-  filtered.sort((a,b)=>{
-    const getRoomNum = x => {
-      try{
-        const parts = (x.id||'').split('.');
-        return {room:(parts[2]||''), num:parseInt(parts[3]||'0',10)||0};
-      } catch(e){ return {room:'',num:0}; }
+ filtered.sort((a, b) => {
+  const parseID = (id) => {
+    const parts = (id || '').split('.');
+    return {
+      zone: (parts[1] || '').toUpperCase(),
+      place: (parts[2] || '').toUpperCase(),
+      num: parseInt(parts[3], 10) || 0
     };
-    const A = getRoomNum(a);
-    const B = getRoomNum(b);
-    const rA = (A.room||'').toUpperCase();
-    const rB = (B.room||'').toUpperCase();
-    if(rA < rB) return -1;
-    if(rA > rB) return 1;
-    return A.num - B.num;
-  });
+  };
+
+  const alphanumPlace = (place) => {
+    const match = place.match(/^([A-Z]+)(\d*)$/i); // rozdělí DPS6 → [DPS, 6]
+    if (match) {
+      return { prefix: match[1], number: parseInt(match[2] || '0', 10) };
+    }
+    return { prefix: place, number: 0 };
+  };
+
+  const A = parseID(a.id);
+  const B = parseID(b.id);
+
+  // 1️⃣ Zóna (TM, TN...) abecedně
+  const zoneCmp = A.zone.localeCompare(B.zone, 'cs', { sensitivity: 'base' });
+  if (zoneCmp !== 0) return zoneCmp;
+
+  // 2️⃣ Místo podle prefixu a čísla
+  const placeA = alphanumPlace(A.place);
+  const placeB = alphanumPlace(B.place);
+
+  const prefixCmp = placeA.prefix.localeCompare(placeB.prefix, 'cs', { sensitivity: 'base' });
+  if (prefixCmp !== 0) return prefixCmp;
+
+  return placeA.number - placeB.number;
+});
 
   const t = document.getElementById("table");
   t.innerHTML = '';
@@ -805,4 +824,5 @@ render();
 
 </body>
 </html>
+
 
